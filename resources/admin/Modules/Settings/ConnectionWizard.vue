@@ -103,6 +103,7 @@
 <script type="text/babel">
     import mailgun from './Partials/Providers/MailGun';
     import pepipost from './Partials/Providers/PepiPost';
+    import enginemailer from './Partials/Providers/Enginemailer';
     import sendgrid from './Partials/Providers/SendGrid';
     import sendinblue from './Partials/Providers/SendInBlue';
     import AmazonSes from './Partials/Providers/AmazonSes';
@@ -131,6 +132,7 @@
             outlook,
             postmark,
             elasticmail,
+            enginemailer,
             Error
         },
         data() {
