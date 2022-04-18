@@ -13,6 +13,7 @@ $singletons = [
     'gmail' => 'FluentMail\App\Services\Mailer\Providers\Gmail\Handler',
     'outlook' => 'FluentMail\App\Services\Mailer\Providers\Outlook\Handler',
     'postmark' => 'FluentMail\App\Services\Mailer\Providers\Postmark\Handler',
+    'enginemailer' => 'FluentMail\App\Services\Mailer\Providers\Enginemailer\Handler',
    // 'elasticmail' => 'FluentMail\App\Services\Mailer\Providers\ElasticMail\Handler',
 ];
 
