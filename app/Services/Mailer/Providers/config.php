@@ -159,6 +159,21 @@ return [
             ],
             'note'     => '<a href="https://fluentsmtp.com/docs/configure-postmark-in-fluent-smtp-to-send-emails/" target="_blank" rel="noopener">Read the documentation</a> for how to configure Postmark with FluentSMTP.'
         ],
+            'enginemailer'     => [
+            'key'      => 'enginemailer',
+            'title'    => __('Enginemailer', 'fluent-smtp'),
+            'image'    => fluentMailAssetUrl('images/postmark.svg'),
+            'provider' => 'Enginemailer',
+            'options'  => [
+                'sender_name'     => '',
+                'sender_email'    => '',
+                'force_from_name' => 'no',
+                'api_key'         => '',
+                'domain_name'     => '',
+                'key_store'       => 'db',
+            ],
+            'note'     => '<a href="https://docs.kirim.email/en/kb/integrate-kirim-email-transactional-with-other-platforms/">Read the documentation</a> for how to configure Kirim.Email, with FluentSMTP.'
+        ],
 //        'elasticmail' => [
 //            'key'      => 'elasticmail',
 //            'title'    => __('Elastic Mail', 'fluent-smtp'),
