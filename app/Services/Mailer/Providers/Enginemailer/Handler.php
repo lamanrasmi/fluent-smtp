@@ -11,60 +11,67 @@ class Handler extends BaseHandler
 
     protected $emailSentCode = 200;
 
-
-    protected $url  = null;
+    protected $url = 'https://api.enginemailer.com/RESTAPI/Submission/SendEmail';
 
     public function send()
     {
-        if ($this->preSend()) {
-            $this->setUrl();
+        if ($this->preSend() && $this->phpMailer->preSend()) {
             return $this->postSend();
         }
 
-        return $this->handleResponse(new \WP_Error(423, 'Something went wrong!', []) );
-    }
-
-    protected function setUrl()
-    {
-        return $this->url = 'https://api.enginemailer.com/RESTAPI/Submission/SendEmail';
+        return $this->handleResponse(new \WP_Error(423, 'Something went wrong!', []));
     }
 
     public function postSend()
     {
         $body = [
-            'from'           => $this->getFrom(),
-            'subject'        => $this->getSubject(),
-            'html'           => $this->getBody(),
-            'h:X-Mailer'     => 'FluentMail - Enginemailer',
-            'h:Content-Type' => $this->getHeader('content-type')
+            'UserKey' => $this->getSetting('api_key'),
+            'SenderEmail'          => $this->getParam('from'),
+            'ToEmail'            => $this->getTo(),
+            'Subject'       => $this->getSubject(),
+            'TemplateId' => $this->getSetting('templateid', 'null')
         ];
 
         if ($replyTo = $this->getReplyTo()) {
-            $body['h:Reply-To'] = $replyTo;
+            $body['ReplyTo'] = $replyTo;
         }
 
-        $recipients = [
-            'to'  => $this->getTo(),
-            'cc'  => $this->getCarbonCopy(),
-            'bcc' => $this->getBlindCarbonCopy()
-        ];
-
-        if ($recipients = array_filter($recipients)) {
-            $body = array_merge($body, $recipients);
+        if ($bcc = $this->getBlindCarbonCopy()) {
+            $body['BCCEmails'] = $bcc;
         }
 
-        $params = [
-            'body'    => $body,
-            'headers' => $this->getRequestHeaders()
-        ];
-
-        $params = array_merge($params, $this->getDefaultParams());
-
-        if (!empty($this->attributes['attachments'])) {
-            $params = $this->getAttachments($params);
+        if ($cc = $this->getCarbonCopy()) {
+            $body['CCEmails'] = $cc;
         }
 
-        $response = wp_safe_remote_post($this->url, $params);
+        if ($this->getHeader('content-type') == 'text/html') {
+            $body['SubmittedContent'] = $this->getParam('message');
+
+            if ($this->getSetting('track_opens') == 'yes') {
+                $body['TrackOpens'] = true;
+            }
+
+            if ($this->getSetting('track_links') == 'yes') {
+                $body['TrackLinks'] = 'HtmlOnly';
+            }
+
+        } else {
+            $body['TextBody'] = $this->getParam('message');
+        }
+
+        if (!empty($this->getParam('attachments'))) {
+            $body['Attachments'] = $this->getAttachments();
+        }
+
+        // Handle apostrophes in email address From names by escaping them for the Postmark API.
+        $from_regex = "/(\"From\": \"[a-zA-Z\\d]+)*[\\\\]{2,}'/";
+
+        $args = array(
+            'headers' => $this->getRequestHeaders(),
+            'body'    => preg_replace($from_regex, "'", wp_json_encode($body), 1),
+        );
+
+        $response = wp_remote_post($this->url, $args);
 
         if (is_wp_error($response)) {
             $returnResponse = new \WP_Error($response->get_error_code(), $response->get_error_message(), $response->get_error_messages());
@@ -72,45 +79,41 @@ class Handler extends BaseHandler
             $responseBody = wp_remote_retrieve_body($response);
             $responseCode = wp_remote_retrieve_response_code($response);
 
-            $isOKCode = $responseCode;
+            $isOKCode = $responseCode == $this->emailSentCode;
 
-            if($isOKCode == 200 ) {
-                $responseBody = \json_decode($responseBody, true);
+            $responseBody = \json_decode($responseBody, true);
+
+            if ($isOKCode) {
                 $returnResponse = [
-                    'error' => Arr::get($responseBody,'error'),
-                    'status'=>Arr::get($responseBody,'status'),
-                    'message' => Arr::get($responseBody, 'message')
+                    'id'      => Arr::get($responseBody, 'MessageID'),
+                    'message' => Arr::get($responseBody, 'Message')
                 ];
             } else {
-                $responseBody = \json_decode($responseBody, true);
-                $returnResponse = new \WP_Error($responseCode, 'Kirim Email API Error : '. Arr::get($responseBody, 'message'));
+                $returnResponse = new \WP_Error($responseCode, Arr::get($responseBody, 'Message', 'Unknown Error'), $responseBody);
             }
         }
 
-        return $this->handleResponse($returnResponse);
+        $this->response = $returnResponse;
+
+        return $this->handleResponse($this->response);
     }
 
     public function setSettings($settings)
     {
         if ($settings['key_store'] == 'wp_config') {
             $settings['api_key'] = defined('FLUENTMAIL_ENGINEMAILER_API_KEY') ? FLUENTMAIL_ENGINEMAILER_API_KEY : '';
-            $settings['domain_name'] = defined('FLUENTMAIL_ENGINEMAILER_DOMAIN') ? FLUENTMAIL_ENGINEMAILER_DOMAIN : '';
         }
+
         $this->settings = $settings;
-
         return $this;
-    }
-
-    protected function getFrom()
-    {
-        return $this->getParam('from');
     }
 
     protected function getReplyTo()
     {
-        return $this->getRecipients(
-            $this->getParam('headers.reply-to')
-        );
+        if ($replyTo = $this->getParam('headers.reply-to')) {
+            $replyTo = reset($replyTo);
+            return $replyTo['email'];
+        }
     }
 
     protected function getTo()
@@ -139,18 +142,11 @@ class Handler extends BaseHandler
         return implode(', ', $array);
     }
 
-    protected function getBody()
-    {
-        return $this->getParam('message');
-    }
-
-    protected function getAttachments($params)
+    protected function getAttachments()
     {
         $data = [];
-        $payload = '';
-        $attachments = $this->attributes['attachments'];
 
-        foreach ($attachments as $attachment) {
+        foreach ($this->getParam('attachments') as $attachment) {
             $file = false;
 
             try {
@@ -167,59 +163,35 @@ class Handler extends BaseHandler
             }
 
             $data[] = [
-                'content' => $file,
-                'name'    => $fileName,
+                'Name'        => $fileName,
+                'Content'     => base64_encode($file),
+                'ContentType' => $this->determineMimeContentRype($attachment[0])
             ];
         }
 
-        if (!empty($data)) {
-            $boundary = hash('sha256', uniqid('', true));
-
-            foreach ($params['body'] as $key => $value) {
-                if (is_array($value)) {
-                    foreach ($value as $child_key => $child_value) {
-                        $payload .= '--' . $boundary;
-                        $payload .= "\r\n";
-                        $payload .= 'Content-Disposition: form-data; name="' . $key . "\"\r\n\r\n";
-                        $payload .= $child_value;
-                        $payload .= "\r\n";
-                    }
-                } else {
-                    $payload .= '--' . $boundary;
-                    $payload .= "\r\n";
-                    $payload .= 'Content-Disposition: form-data; name="' . $key . '"' . "\r\n\r\n";
-                    $payload .= $value;
-                    $payload .= "\r\n";
-                }
-            }
-
-            foreach ($data as $key => $attachment) {
-                $payload .= '--' . $boundary;
-                $payload .= "\r\n";
-                $payload .= 'Content-Disposition: form-data; name="attachment[' . $key . ']"; filename="' . $attachment['name'] . '"' . "\r\n\r\n";
-                $payload .= $attachment['content'];
-                $payload .= "\r\n";
-            }
-
-            $payload .= '--' . $boundary . '--';
-
-            $params['body'] = $payload;
-
-            $params['headers']['Content-Type'] = 'multipart/form-data; boundary=' . $boundary;
-
-            $this->attributes['headers']['content-type'] = 'multipart/form-data';
-        }
-
-        return $params;
+        return $data;
     }
 
     protected function getRequestHeaders()
     {
-        $apiKey = $this->getSetting('api_key');
-        $domain = $this->getSetting('domain_name');
         return [
-            'Authorization' => 'Basic ' . base64_encode('api:' . $apiKey),
-            'domain'=>$domain
+            'Accept'                  => 'application/json',
+            'Content-Type'            => 'application/json',
+            
         ];
+    }
+
+    protected function determineMimeContentRype($filename)
+    {
+        if (function_exists('mime_content_type')) {
+            return mime_content_type($filename);
+        } elseif (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime_type = finfo_file($finfo, $filename);
+            finfo_close($finfo);
+            return $mime_type;
+        } else {
+            return 'application/octet-stream';
+        }
     }
 }
